@@ -35,7 +35,7 @@ Install the following on the development or presentation laptop:
 
 ```powershell
 git clone <https://github.com/D4C-4/InkSpeed.git>
-cd "SDF04 Project"
+cd "InkSpeed"
 ```
 
 ### Backend setup

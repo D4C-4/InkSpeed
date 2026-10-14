@@ -1,0 +1,36 @@
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Node.js, Vite, and Electron build output
+node_modules/
+dist/
+.vite/
+.wrangler/
+web/.nitro/
+web/.tanstack/
+
+# Test and coverage output
+coverage/
+.coverage
+*.cover
+
+# Local configuration and secrets
+.env
+.env.local
+.env.*.local
+
+# Logs and operating-system files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db

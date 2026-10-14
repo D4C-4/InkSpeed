@@ -1,0 +1,170 @@
+QMainWindow, QWidget, QScrollArea#bodyScroll, QWidget#page, QWidget#bodyHost {
+    background: #f4efe0;
+    color: #192038;
+    font-family: "Segoe UI";
+    font-size: 14px;
+}
+
+QMainWindow {
+    background: #f4efe0;
+}
+
+QScrollArea#bodyScroll {
+    border: none;
+}
+
+QWidget#header {
+    background: #fbf8ee;
+    border-bottom: 1px solid #192038;
+    min-height: 42px;
+    max-height: 42px;
+}
+
+QWidget#bodyHost {
+    min-width: 760px;
+}
+
+QLabel#logo {
+    color: #192038;
+    font-family: Georgia;
+    font-size: 23px;
+}
+
+QLabel#headerUser, QLabel#muted {
+    color: #6c7082;
+}
+
+QLabel#headerUser {
+    font-family: Consolas;
+    font-size: 12px;
+}
+
+QPushButton#navButton {
+    background: transparent;
+    color: #192038;
+    border: none;
+    padding: 6px 13px;
+}
+
+QPushButton#navButton:hover, QPushButton#navButton:pressed {
+    background: #192038;
+    color: #fbf8ee;
+}
+
+QLabel#eyebrow {
+    color: #e74b28;
+    font-family: Consolas;
+    font-size: 11px;
+    letter-spacing: 3px;
+    margin-top: 25px;
+}
+
+QLabel#hero, QLabel#pageTitle {
+    color: #192038;
+    font-family: Georgia;
+    font-weight: bold;
+}
+
+QLabel#hero {
+    font-size: 52px;
+    line-height: 1.05;
+    margin-bottom: 24px;
+}
+
+QLabel#pageTitle {
+    font-size: 44px;
+    margin-top: 28px;
+    margin-bottom: 12px;
+}
+
+QLabel#sectionTitle {
+    color: #192038;
+    font-family: Georgia;
+    font-size: 25px;
+    font-weight: bold;
+    margin-top: 22px;
+}
+
+QLabel#cardTitle {
+    color: #192038;
+    font-family: Georgia;
+    font-size: 22px;
+    font-weight: bold;
+}
+
+QWidget#card, QWidget#modeCard {
+    background: #fbf8ee;
+    border: 1px solid #192038;
+    border-right: 4px solid #192038;
+    border-bottom: 5px solid #192038;
+}
+
+QWidget#card {
+    margin-top: 8px;
+    padding: 8px;
+}
+
+QListWidget#playerList {
+    min-height: 120px;
+    padding: 5px;
+}
+
+QListWidget#playerList::item {
+    background: #192038;
+    color: #fbf8ee;
+    padding: 6px 10px;
+    margin-right: 4px;
+}
+
+QListWidget#playerList::item:selected {
+    background: #192038;
+    color: #fbf8ee;
+}
+
+QWidget#modeCard {
+    min-height: 140px;
+}
+
+QPushButton, QPushButton#primaryButton {
+    background: #192038;
+    color: #fbf8ee;
+    border: 1px solid #192038;
+    padding: 8px 14px;
+    font-family: Consolas;
+}
+
+QPushButton:hover, QPushButton#primaryButton:hover {
+    background: #e74b28;
+    border-color: #e74b28;
+}
+
+QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QListWidget, QTableWidget {
+    background: #fbf8ee;
+    color: #192038;
+    border: 1px solid #192038;
+    padding: 7px;
+    selection-background-color: #e74b28;
+}
+
+QTableWidget {
+    border-right: 4px solid #192038;
+    border-bottom: 5px solid #192038;
+}
+
+QHeaderView::section {
+    background: #fbf8ee;
+    color: #192038;
+    padding: 8px;
+    border: none;
+    border-bottom: 1px solid #192038;
+    font-family: Consolas;
+    font-size: 11px;
+}
+
+QLabel#passage {
+    background: #fbf8ee;
+    border: 2px solid #e74b28;
+    padding: 24px;
+    font-family: Consolas;
+    font-size: 18px;
+}

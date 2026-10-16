@@ -147,13 +147,13 @@ export const ACHIEVEMENTS: Achievement[] = [
     code: "wpm_40",
     name: "Quick Quill",
     description: "Reach 40 WPM in Classic.",
-    test: (r) => r.mode === "classic" && r.wpm >= 40,
+    test: (r) => r.mode === "classic" && r.wpm >= 40 && r.accuracy >= 90,
   },
   {
     code: "wpm_70",
     name: "Speed Scribe",
     description: "Reach 70 WPM in Classic.",
-    test: (r) => r.mode === "classic" && r.wpm >= 70,
+    test: (r) => r.mode === "classic" && r.wpm >= 70 && r.accuracy >= 90,
   },
   {
     code: "flawless",

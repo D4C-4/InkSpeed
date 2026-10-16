@@ -49,7 +49,8 @@ ROLE_VIEWER = "Viewer"
 
 
 def _role_id(cursor: Any, role_name: str) -> int:
-    cursor.execute("SELECT role_id FROM user_roles WHERE role_name = %s", (role_name,))
+    cursor.execute(
+        "SELECT role_id FROM user_roles WHERE role_name = %s", (role_name,))
     row = cursor.fetchone()
     if row is None:
         raise RuntimeError(f"Role {role_name} is not configured.")
@@ -80,7 +81,8 @@ def _require_role(actor_user_id: int | None, allowed: set[str], owner_id: int | 
     try:
         role = _role_name(actor_user_id, cursor)
         if role not in allowed and (owner_id is None or actor_user_id != owner_id):
-            raise AuthorizationError("You are not allowed to perform this action.")
+            raise AuthorizationError(
+                "You are not allowed to perform this action.")
     finally:
         cursor.close()
         conn.close()
@@ -101,9 +103,11 @@ def validate_username(username: str) -> str:
     if not cleaned:
         raise UsernameError("Please enter a username.")
     if len(cleaned) < USERNAME_MIN:
-        raise UsernameError("Username is too short. Use at least 4 characters.")
+        raise UsernameError(
+            "Username is too short. Use at least 4 characters.")
     if len(cleaned) > USERNAME_MAX:
-        raise UsernameError("Username is too long. Use 20 characters or fewer.")
+        raise UsernameError(
+            "Username is too long. Use 20 characters or fewer.")
     if _USERNAME_RE.fullmatch(cleaned) is None:
         raise UsernameError(
             "Use only letters, numbers, underscore (_), dot (.) or hyphen (-). No spaces."
@@ -214,7 +218,8 @@ def add_user(
         row = cursor.fetchone()
         if row is None:
             raise RuntimeError("User was inserted but could not be reloaded.")
-        _audit(cursor, actor_user_id, "CREATE", "users", int(row["user_id"]), {"username": name})
+        _audit(cursor, actor_user_id, "CREATE", "users",
+               int(row["user_id"]), {"username": name})
         conn.commit()
         return _user_from_row(row)
     finally:
@@ -275,7 +280,8 @@ def rename_user(user_id: int, username: str, actor_user_id: int | None = None) -
         )
         current = cursor.fetchone()
         if current is None:
-            raise UsernameError("That user no longer exists. Please select a player again.")
+            raise UsernameError(
+                "That user no longer exists. Please select a player again.")
         if current["username"] == name:
             raise UsernameError(
                 "That is already your username. Enter a different one to rename."
@@ -317,7 +323,8 @@ def rename_user(user_id: int, username: str, actor_user_id: int | None = None) -
         row = cursor.fetchone()
         if row is None:
             raise RuntimeError("User was updated but could not be reloaded.")
-        _audit(cursor, actor_user_id, "UPDATE", "users", user_id, {"username": name})
+        _audit(cursor, actor_user_id, "UPDATE",
+               "users", user_id, {"username": name})
         conn.commit()
         return _user_from_row(row)
     finally:
@@ -432,9 +439,13 @@ def add_challenge(
         )
         row = cursor.fetchone()
         if row is None:
-            raise RuntimeError("Challenge was inserted but could not be reloaded.")
-        _audit(cursor, actor_user_id, "CREATE", "challenges", int(row["challenge_id"]), {"category": category})
+            raise RuntimeError(
+                "Challenge was inserted but could not be reloaded.")
+        _audit(cursor, actor_user_id, "CREATE", "challenges",
+               int(row["challenge_id"]), {"category": category})
         conn.commit()
+        raise RuntimeError(
+            "Challenge was inserted but could not be reloaded.")
         return _challenge_from_row(row)
     finally:
         cursor.close()
@@ -478,8 +489,10 @@ def update_challenge(
         )
         row = cursor.fetchone()
         if row is None:
-            raise RuntimeError("Challenge was updated but could not be reloaded.")
-        _audit(cursor, actor_user_id, "UPDATE", "challenges", challenge_id, {"category": category})
+            raise RuntimeError(
+                "Challenge was updated but could not be reloaded.")
+        _audit(cursor, actor_user_id, "UPDATE", "challenges",
+               challenge_id, {"category": category})
         conn.commit()
         return _challenge_from_row(row)
     finally:
@@ -559,7 +572,8 @@ def save_result(
             (user_id, _mode_label(draft.mode)),
         )
         previous_row = cursor.fetchone()
-        cursor.execute("SELECT mode_id FROM game_modes WHERE mode_name = %s", (_mode_label(draft.mode),))
+        cursor.execute(
+            "SELECT mode_id FROM game_modes WHERE mode_name = %s", (_mode_label(draft.mode),))
         mode_id = int(cursor.fetchone()["mode_id"])
 
         cursor.execute(
@@ -577,6 +591,7 @@ def save_result(
                 draft.errors,
                 score,
                 draft.duration_seconds,
+                draft.rounds,
                 draft.rounds,
             ),
         )
@@ -609,8 +624,10 @@ def save_result(
         )
         result_row = cursor.fetchone()
         if result_row is None:
-            raise RuntimeError("Result was inserted but could not be reloaded.")
-        result = _result_from_row(result_row, _round_records(cursor, result_id))
+            raise RuntimeError(
+                "Result was inserted but could not be reloaded.")
+        result = _result_from_row(
+            result_row, _round_records(cursor, result_id))
 
         cursor.execute(
             """
@@ -639,7 +656,8 @@ def save_result(
                     unlocked.append(achievement)
 
         _upsert_personal_best(cursor, user_id, mode_id, score, result_id)
-        _audit(cursor, actor_user_id, "CREATE", "results", result_id, {"mode": draft.mode.value})
+        _audit(cursor, actor_user_id, "CREATE", "results",
+               result_id, {"mode": draft.mode.value})
         conn.commit()
         previous_score = float(previous_row["score"]) if previous_row else None
         return SaveOutcome(
@@ -732,15 +750,19 @@ def delete_result(
             raise ValueError("That result no longer exists.")
         if int(row["user_id"]) != user_id:
             raise AuthorizationError("You can only delete your own results.")
-        cursor.execute("DELETE FROM round_results WHERE result_id = %s", (result_id,))
-        cursor.execute("DELETE FROM user_achievements WHERE result_id = %s", (result_id,))
+        cursor.execute(
+            "DELETE FROM round_results WHERE result_id = %s", (result_id,))
+        cursor.execute(
+            "DELETE FROM user_achievements WHERE result_id = %s", (result_id,))
         cursor.execute(
             "UPDATE personal_bests SET result_id = NULL WHERE result_id = %s",
             (result_id,),
         )
-        cursor.execute("DELETE FROM results WHERE result_id = %s AND user_id = %s", (result_id, user_id))
+        cursor.execute(
+            "DELETE FROM results WHERE result_id = %s AND user_id = %s", (result_id, user_id))
         _recalculate_personal_best(cursor, user_id, int(row["mode_id"]))
-        _audit(cursor, actor_user_id, "DELETE", "results", result_id, {"user_id": user_id})
+        _audit(cursor, actor_user_id, "DELETE",
+               "results", result_id, {"user_id": user_id})
         conn.commit()
         re_evaluate_achievements(user_id, actor_user_id)
     except Exception:
@@ -779,7 +801,8 @@ def get_results(
         )
         results = []
         for row in cursor.fetchall():
-            results.append(_result_from_row(row, _round_records(cursor, row["result_id"])))
+            results.append(_result_from_row(
+                row, _round_records(cursor, row["result_id"])))
         return results
     finally:
         cursor.close()
@@ -805,7 +828,8 @@ def get_leaderboard(mode: ModeCode) -> list[Result]:
         )
         results = []
         for row in cursor.fetchall():
-            results.append(_result_from_row(row, _round_records(cursor, row["result_id"])))
+            results.append(_result_from_row(
+                row, _round_records(cursor, row["result_id"])))
         return results
     finally:
         cursor.close()
@@ -837,13 +861,20 @@ def seed_challenges() -> None:
     try:
         for category, difficulty, text in (
             ("Proverbs", Difficulty.EASY, "The early bird catches the worm."),
-            ("Proverbs", Difficulty.EASY, "Practice makes perfect, so keep on typing."),
-            ("Nature", Difficulty.EASY, "The river runs quietly past the old stone bridge."),
-            ("Nature", Difficulty.MEDIUM, "Morning fog drifted over the hills while the birds began their song."),
-            ("Technology", Difficulty.MEDIUM, "A good program is written for people to read and only incidentally for machines to run."),
-            ("Literature", Difficulty.MEDIUM, "Ink spilled across the page like a story that refused to wait its turn."),
-            ("Technology", Difficulty.HARD, "Encapsulation, inheritance, polymorphism, and abstraction form the pillars of object-oriented design."),
-            ("Science", Difficulty.HARD, "Photosynthesis converts light energy into chemical energy, releasing oxygen as a by-product."),
+            ("Proverbs", Difficulty.EASY,
+             "Practice makes perfect, so keep on typing."),
+            ("Nature", Difficulty.EASY,
+             "The river runs quietly past the old stone bridge."),
+            ("Nature", Difficulty.MEDIUM,
+             "Morning fog drifted over the hills while the birds began their song."),
+            ("Technology", Difficulty.MEDIUM,
+             "A good program is written for people to read and only incidentally for machines to run."),
+            ("Literature", Difficulty.MEDIUM,
+             "Ink spilled across the page like a story that refused to wait its turn."),
+            ("Technology", Difficulty.HARD,
+             "Encapsulation, inheritance, polymorphism, and abstraction form the pillars of object-oriented design."),
+            ("Science", Difficulty.HARD,
+             "Photosynthesis converts light energy into chemical energy, releasing oxygen as a by-product."),
         ):
             category_id = _category_id(cursor, category)
             cursor.execute(
@@ -868,10 +899,12 @@ def seed_defaults() -> None:
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
     try:
-        cursor.execute("SELECT user_id FROM users WHERE username = %s", ("admin",))
+        cursor.execute(
+            "SELECT user_id FROM users WHERE username = %s", ("admin",))
         if cursor.fetchone() is None:
             admin_password = getenv("INKSPEED_ADMIN_PASSWORD", "Admin@12345")
-            cursor.execute("SELECT role_id FROM user_roles WHERE role_name = %s", (ROLE_ADMIN,))
+            cursor.execute(
+                "SELECT role_id FROM user_roles WHERE role_name = %s", (ROLE_ADMIN,))
             role_id = cursor.fetchone()["role_id"]
             cursor.execute(
                 """
@@ -880,7 +913,8 @@ def seed_defaults() -> None:
                 """,
                 ("admin", generate_password_hash(admin_password), role_id),
             )
-            _audit(cursor, None, "CREATE", "users", cursor.lastrowid, {"username": "admin"})
+            _audit(cursor, None, "CREATE", "users",
+                   cursor.lastrowid, {"username": "admin"})
             conn.commit()
     finally:
         cursor.close()
@@ -936,7 +970,8 @@ def re_evaluate_achievements(user_id: int, actor_user_id: int | None = None) -> 
             achievement_row = cursor.fetchone()
             if achievement_row is None:
                 continue
-            qualifies = next((result for result in results if achievement.test(result)), None)
+            qualifies = next(
+                (result for result in results if achievement.test(result)), None)
             if qualifies is None:
                 cursor.execute(
                     """
@@ -951,7 +986,8 @@ def re_evaluate_achievements(user_id: int, actor_user_id: int | None = None) -> 
                     INSERT IGNORE INTO user_achievements (user_id, achievement_id, result_id)
                     VALUES (%s, %s, %s)
                     """,
-                    (user_id, achievement_row["achievement_id"], qualifies.result_id),
+                    (user_id,
+                     achievement_row["achievement_id"], qualifies.result_id),
                 )
         conn.commit()
     except Exception:

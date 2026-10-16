@@ -58,7 +58,7 @@ function History() {
                 <td className="p-3 font-bold">{r.score}</td>
                 <td className="p-3">{formatDuration(r.duration)}</td>
                 <td className="p-3">{r.mode === "memory" ? r.rounds : "—"}</td>
-                <td className="p-3"><button onClick={() => confirm("Delete this result?") && store.deleteResult(r.id)} className="text-xs text-muted-foreground hover:text-destructive">delete</button></td>
+                <td className="p-3"><button onClick={() => confirm("Delete this result?") && store.deleteResult(user.id, r.id)} className="text-xs text-muted-foreground hover:text-destructive">delete</button></td>
               </tr>
             ))}
           </tbody>

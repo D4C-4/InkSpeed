@@ -19,6 +19,7 @@ from database.database_manager import (
     add_challenge,
     add_user,
     delete_challenge,
+    delete_result,
     delete_user,
     get_challenges,
     get_results,
@@ -145,6 +146,12 @@ def create_or_update_challenge():
 @app.delete("/api/challenges/<int:challenge_id>")
 def remove_challenge(challenge_id: int):
     delete_challenge(challenge_id)
+    return jsonify(_state())
+
+
+@app.delete("/api/users/<int:user_id>/results/<int:result_id>")
+def remove_result(user_id: int, result_id: int):
+    delete_result(user_id, result_id)
     return jsonify(_state())
 
 

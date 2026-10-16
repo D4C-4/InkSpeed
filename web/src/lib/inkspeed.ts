@@ -310,8 +310,8 @@ export const store = {
       isNewBest: response.outcome.is_new_best,
     };
   },
-  deleteResult(_id: string) {
-    throw new Error("Result deletion is not enabled in the MySQL repository.");
+  deleteResult(userId: string, resultId: string) {
+    return apply(request<any>("DELETE", `/users/${userId}/results/${resultId}`));
   },
 };
 export function personalBest(results: Result[], userId: string, mode: ModeCode) {

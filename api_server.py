@@ -24,6 +24,7 @@ from database.database_manager import (
     get_results,
     get_selected_user_id,
     get_user_achievements,
+    get_user,
     get_users,
     rename_user,
     save_result,
@@ -85,7 +86,8 @@ def _state() -> dict[str, Any]:
         "challenges": _json_value(get_challenges()),
         "results": _json_value(results),
         "userAchievements": _json_value(
-            [achievement for user in users for achievement in get_user_achievements(user.user_id)]
+            [achievement for user in users for achievement in get_user_achievements(
+                user.user_id)]
         ),
         "currentUserId": get_selected_user_id(),
     }
@@ -93,7 +95,8 @@ def _state() -> dict[str, Any]:
 
 @app.after_request
 def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+    response.headers["Access-Control-Allow-Origin"] = request.headers.get(
+        "Origin", "*")
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     response.headers["Access-Control-Allow-Methods"] = "GET,POST,PATCH,DELETE,OPTIONS"
     return response
@@ -136,9 +139,11 @@ def create_or_update_challenge():
     difficulty = Difficulty(data["difficulty"])
     challenge_id = data.get("id")
     if challenge_id is None:
-        add_challenge(data.get("category", ""), difficulty, data.get("text", ""))
+        add_challenge(data.get("category", ""),
+                      difficulty, data.get("text", ""))
     else:
-        update_challenge(int(challenge_id), data.get("category", ""), difficulty, data.get("text", ""))
+        update_challenge(int(challenge_id), data.get(
+            "category", ""), difficulty, data.get("text", ""))
     return jsonify(_state())
 
 
@@ -152,8 +157,9 @@ def remove_challenge(challenge_id: int):
 def create_result():
     data = request.json
     user_id = int(data["userId"])
-    if not any(user.user_id == user_id for user in get_users()):
-        return jsonify({"error": "The selected user no longer exists. Please select or create a user again."}), 400
+    if get_user(user_id) is None:
+        logger.warning("Attempted to create result for non-existent user")
+        return jsonify({"error": "The selected user is no longer available. Please select or create a user again."}), 400
     rounds = [
         RoundRecord(
             int(round_data["round"]),
@@ -177,8 +183,9 @@ def create_result():
             ),
         )
         return jsonify({"state": _state(), "outcome": _json_value(outcome)})
-    except IntegrityError:
-        return jsonify({"error": "The selected user is no longer available. Please select or create a user again."}), 400
+    except IntegrityError as error:
+        logger.exception("save_result failed", exc_info=error)
+        return jsonify({"error": f"Could not save result: {error.msg}"}), 400
 
 
 @app.get("/api/health")

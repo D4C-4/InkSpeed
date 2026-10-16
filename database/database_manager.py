@@ -42,9 +42,11 @@ def validate_username(username: str) -> str:
     if not cleaned:
         raise UsernameError("Please enter a username.")
     if len(cleaned) < USERNAME_MIN:
-        raise UsernameError("Username is too short. Use at least 4 characters.")
+        raise UsernameError(
+            "Username is too short. Use at least 4 characters.")
     if len(cleaned) > USERNAME_MAX:
-        raise UsernameError("Username is too long. Use 20 characters or fewer.")
+        raise UsernameError(
+            "Username is too long. Use 20 characters or fewer.")
     if _USERNAME_RE.fullmatch(cleaned) is None:
         raise UsernameError(
             "Use only letters, numbers, underscore (_), dot (.) or hyphen (-). No spaces."
@@ -168,7 +170,8 @@ def rename_user(user_id: int, username: str) -> User:
         )
         current = cursor.fetchone()
         if current is None:
-            raise UsernameError("That user no longer exists. Please select a player again.")
+            raise UsernameError(
+                "That user no longer exists. Please select a player again.")
         if current["username"] == name:
             raise UsernameError(
                 "That is already your username. Enter a different one to rename."
@@ -304,7 +307,8 @@ def add_challenge(category: str, difficulty: Difficulty, text: str) -> Challenge
         )
         row = cursor.fetchone()
         if row is None:
-            raise RuntimeError("Challenge was inserted but could not be reloaded.")
+            raise RuntimeError(
+                "Challenge was inserted but could not be reloaded.")
         return _challenge_from_row(row)
     finally:
         cursor.close()
@@ -343,7 +347,8 @@ def update_challenge(
         )
         row = cursor.fetchone()
         if row is None:
-            raise RuntimeError("Challenge was updated but could not be reloaded.")
+            raise RuntimeError(
+                "Challenge was updated but could not be reloaded.")
         return _challenge_from_row(row)
     finally:
         cursor.close()
@@ -394,6 +399,9 @@ def _round_records(cursor: Any, result_id: int) -> list[RoundRecord]:
     ]
 
 
+MODE_IDS = {"classic": 1, "memory": 2, "chaos": 3}
+
+
 def save_result(user_id: int, draft: ResultDraft) -> SaveOutcome:
     """Persist a result, its rounds, and newly unlocked achievements atomically."""
     score = _score(draft)
@@ -417,17 +425,20 @@ def save_result(user_id: int, draft: ResultDraft) -> SaveOutcome:
         cursor.execute(
             """
             INSERT INTO results
-                (user_id, mode, wpm, accuracy, errors, score, duration_seconds, rounds)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (user_id, mode, mode_id, wpm, accuracy, errors, score,
+                 duration_seconds, rounds, rounds_completed)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 user_id,
                 draft.mode.value,
+                MODE_IDS[draft.mode.value],
                 draft.wpm,
                 draft.accuracy,
                 draft.errors,
                 score,
                 draft.duration_seconds,
+                draft.rounds,
                 draft.rounds,
             ),
         )
@@ -460,8 +471,10 @@ def save_result(user_id: int, draft: ResultDraft) -> SaveOutcome:
         )
         result_row = cursor.fetchone()
         if result_row is None:
-            raise RuntimeError("Result was inserted but could not be reloaded.")
-        result = _result_from_row(result_row, _round_records(cursor, result_id))
+            raise RuntimeError(
+                "Result was inserted but could not be reloaded.")
+        result = _result_from_row(
+            result_row, _round_records(cursor, result_id))
 
         cursor.execute(
             """
@@ -532,7 +545,8 @@ def get_results(
         )
         results = []
         for row in cursor.fetchall():
-            results.append(_result_from_row(row, _round_records(cursor, row["result_id"])))
+            results.append(_result_from_row(
+                row, _round_records(cursor, row["result_id"])))
         return results
     finally:
         cursor.close()
@@ -567,7 +581,8 @@ def get_leaderboard(mode: ModeCode) -> list[Result]:
             if row["user_id"] in seen_users:
                 continue
             seen_users.add(row["user_id"])
-            results.append(_result_from_row(row, _round_records(cursor, row["result_id"])))
+            results.append(_result_from_row(
+                row, _round_records(cursor, row["result_id"])))
         return results
     finally:
         cursor.close()
@@ -599,13 +614,20 @@ def seed_challenges() -> None:
     try:
         for category, difficulty, text in (
             ("Proverbs", Difficulty.EASY, "The early bird catches the worm."),
-            ("Proverbs", Difficulty.EASY, "Practice makes perfect, so keep on typing."),
-            ("Nature", Difficulty.EASY, "The river runs quietly past the old stone bridge."),
-            ("Nature", Difficulty.MEDIUM, "Morning fog drifted over the hills while the birds began their song."),
-            ("Technology", Difficulty.MEDIUM, "A good program is written for people to read and only incidentally for machines to run."),
-            ("Literature", Difficulty.MEDIUM, "Ink spilled across the page like a story that refused to wait its turn."),
-            ("Technology", Difficulty.HARD, "Encapsulation, inheritance, polymorphism, and abstraction form the pillars of object-oriented design."),
-            ("Science", Difficulty.HARD, "Photosynthesis converts light energy into chemical energy, releasing oxygen as a by-product."),
+            ("Proverbs", Difficulty.EASY,
+             "Practice makes perfect, so keep on typing."),
+            ("Nature", Difficulty.EASY,
+             "The river runs quietly past the old stone bridge."),
+            ("Nature", Difficulty.MEDIUM,
+             "Morning fog drifted over the hills while the birds began their song."),
+            ("Technology", Difficulty.MEDIUM,
+             "A good program is written for people to read and only incidentally for machines to run."),
+            ("Literature", Difficulty.MEDIUM,
+             "Ink spilled across the page like a story that refused to wait its turn."),
+            ("Technology", Difficulty.HARD,
+             "Encapsulation, inheritance, polymorphism, and abstraction form the pillars of object-oriented design."),
+            ("Science", Difficulty.HARD,
+             "Photosynthesis converts light energy into chemical energy, releasing oxygen as a by-product."),
         ):
             cursor.execute(
                 """

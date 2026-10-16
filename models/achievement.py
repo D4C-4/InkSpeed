@@ -31,13 +31,13 @@ ACHIEVEMENTS: tuple[Achievement, ...] = (
         "wpm_40",
         "Quick Quill",
         "Reach 40 WPM in Classic.",
-        lambda r: r.mode == ModeCode.CLASSIC and r.wpm >= 40,
+        lambda r: r.mode == ModeCode.CLASSIC and r.wpm >= 40 and r.accuracy >= 90,
     ),
     Achievement(
         "wpm_70",
         "Speed Scribe",
         "Reach 70 WPM in Classic.",
-        lambda r: r.mode == ModeCode.CLASSIC and r.wpm >= 70,
+        lambda r: r.mode == ModeCode.CLASSIC and r.wpm >= 70 and r.accuracy >= 90,
     ),
     Achievement(
         "flawless",

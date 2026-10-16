@@ -10,3 +10,5 @@ class User:
     user_id: int
     username: str
     created_at: datetime
+    role_id: int | None = None
+    role_name: str = "Player"

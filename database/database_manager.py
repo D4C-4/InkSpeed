@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+import json
 from typing import Any
 
 from mysql.connector import IntegrityError
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from database.connection import connect_db
 from models import (
@@ -37,6 +39,63 @@ class UsernameError(ValueError):
     """A user-facing username validation error."""
 
 
+class AuthorizationError(PermissionError):
+    """A user does not have permission to perform an operation."""
+
+
+ROLE_ADMIN = "Admin"
+ROLE_PLAYER = "Player"
+ROLE_VIEWER = "Viewer"
+
+
+def _role_id(cursor: Any, role_name: str) -> int:
+    cursor.execute("SELECT role_id FROM user_roles WHERE role_name = %s", (role_name,))
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError(f"Role {role_name} is not configured.")
+    return int(row["role_id"] if isinstance(row, dict) else row[0])
+
+
+def _role_name(user_id: int, cursor: Any) -> str:
+    cursor.execute(
+        """
+        SELECT ur.role_name
+        FROM users AS u
+        INNER JOIN user_roles AS ur ON ur.role_id = u.role_id
+        WHERE u.user_id = %s
+        """,
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise AuthorizationError("The signed-in user no longer exists.")
+    return row["role_name"] if isinstance(row, dict) else row[0]
+
+
+def _require_role(actor_user_id: int | None, allowed: set[str], owner_id: int | None = None) -> None:
+    if actor_user_id is None:
+        return
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        role = _role_name(actor_user_id, cursor)
+        if role not in allowed and (owner_id is None or actor_user_id != owner_id):
+            raise AuthorizationError("You are not allowed to perform this action.")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _audit(cursor: Any, actor_user_id: int | None, action: str, entity: str, entity_id: int | None, details: dict[str, Any] | None = None) -> None:
+    cursor.execute(
+        """
+        INSERT INTO audit_log (actor_user_id, action_name, entity_name, entity_id, details)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (actor_user_id, action, entity, entity_id, json.dumps(details or {})),
+    )
+
+
 def validate_username(username: str) -> str:
     cleaned = username.strip()
     if not cleaned:
@@ -63,8 +122,26 @@ def _validate_challenge(category: str, text: str) -> tuple[str, str]:
     return cleaned_category, cleaned_text
 
 
+def _category_id(cursor: Any, category: str) -> int:
+    cursor.execute(
+        """
+        INSERT INTO challenge_categories (category_name)
+        VALUES (%s)
+        ON DUPLICATE KEY UPDATE category_id = LAST_INSERT_ID(category_id)
+        """,
+        (category,),
+    )
+    return int(cursor.lastrowid)
+
+
 def _user_from_row(row: dict[str, Any]) -> User:
-    return User(row["user_id"], row["username"], row["created_at"])
+    return User(
+        row["user_id"],
+        row["username"],
+        row["created_at"],
+        row.get("role_id"),
+        row.get("role_name", ROLE_PLAYER),
+    )
 
 
 def _challenge_from_row(row: dict[str, Any]) -> Challenge:
@@ -98,14 +175,26 @@ def _result_from_row(
     )
 
 
-def add_user(username: str) -> User:
+def add_user(
+    username: str,
+    password: str | None = None,
+    role_name: str = ROLE_PLAYER,
+    actor_user_id: int | None = None,
+) -> User:
     """Create and return a user."""
+    _require_role(actor_user_id, {ROLE_ADMIN})
     name = validate_username(username)
+    if password is not None and len(password) < 8:
+        raise ValueError("Password must be at least 8 characters.")
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
     try:
+        role = _role_id(cursor, role_name)
         try:
-            cursor.execute("INSERT INTO users (username) VALUES (%s)", (name,))
+            cursor.execute(
+                "INSERT INTO users (username, password_hash, role_id) VALUES (%s, %s, %s)",
+                (name, generate_password_hash(password or name), role),
+            )
         except IntegrityError as error:
             if error.errno == 1062:
                 raise UsernameError(
@@ -114,12 +203,19 @@ def add_user(username: str) -> User:
             raise
         conn.commit()
         cursor.execute(
-            "SELECT user_id, username, created_at FROM users WHERE user_id = %s",
+            """
+            SELECT u.user_id, u.username, u.created_at, u.role_id, ur.role_name
+            FROM users AS u
+            INNER JOIN user_roles AS ur ON ur.role_id = u.role_id
+            WHERE u.user_id = %s
+            """,
             (cursor.lastrowid,),
         )
         row = cursor.fetchone()
         if row is None:
             raise RuntimeError("User was inserted but could not be reloaded.")
+        _audit(cursor, actor_user_id, "CREATE", "users", int(row["user_id"]), {"username": name})
+        conn.commit()
         return _user_from_row(row)
     finally:
         cursor.close()
@@ -134,7 +230,12 @@ def get_users() -> list[User]:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT user_id, username, created_at FROM users ORDER BY username"
+            """
+            SELECT u.user_id, u.username, u.created_at, u.role_id, ur.role_name
+            FROM users AS u
+            INNER JOIN user_roles AS ur ON ur.role_id = u.role_id
+            ORDER BY u.username
+            """
         )
         return [_user_from_row(row) for row in cursor.fetchall()]
     finally:
@@ -147,7 +248,12 @@ def get_user(user_id: int) -> User | None:
     cursor = conn.cursor(dictionary=True)
     try:
         cursor.execute(
-            "SELECT user_id, username, created_at FROM users WHERE user_id = %s",
+            """
+            SELECT u.user_id, u.username, u.created_at, u.role_id, ur.role_name
+            FROM users AS u
+            INNER JOIN user_roles AS ur ON ur.role_id = u.role_id
+            WHERE u.user_id = %s
+            """,
             (user_id,),
         )
         row = cursor.fetchone()
@@ -157,7 +263,8 @@ def get_user(user_id: int) -> User | None:
         conn.close()
 
 
-def rename_user(user_id: int, username: str) -> User:
+def rename_user(user_id: int, username: str, actor_user_id: int | None = None) -> User:
+    _require_role(actor_user_id, {ROLE_ADMIN}, user_id)
     name = validate_username(username)
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
@@ -199,19 +306,27 @@ def rename_user(user_id: int, username: str) -> User:
             raise ValueError(f"User {user_id} does not exist.")
         conn.commit()
         cursor.execute(
-            "SELECT user_id, username, created_at FROM users WHERE user_id = %s",
+            """
+            SELECT u.user_id, u.username, u.created_at, u.role_id, ur.role_name
+            FROM users AS u
+            INNER JOIN user_roles AS ur ON ur.role_id = u.role_id
+            WHERE u.user_id = %s
+            """,
             (user_id,),
         )
         row = cursor.fetchone()
         if row is None:
             raise RuntimeError("User was updated but could not be reloaded.")
+        _audit(cursor, actor_user_id, "UPDATE", "users", user_id, {"username": name})
+        conn.commit()
         return _user_from_row(row)
     finally:
         cursor.close()
         conn.close()
 
 
-def delete_user(user_id: int) -> None:
+def delete_user(user_id: int, actor_user_id: int | None = None) -> None:
+    _require_role(actor_user_id, {ROLE_ADMIN}, user_id)
     conn = connect_db()
     cursor = conn.cursor()
     try:
@@ -240,6 +355,7 @@ def delete_user(user_id: int) -> None:
             """,
             (str(user_id),),
         )
+        _audit(cursor, actor_user_id, "DELETE", "users", user_id)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -266,9 +382,12 @@ def get_challenges(
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         cursor.execute(
             f"""
-            SELECT challenge_id, category, difficulty, text, is_active,
-                   created_at, updated_at
+            SELECT c.challenge_id, cc.category_name AS category, c.difficulty,
+                   COALESCE(c.text, c.passage_text) AS text, c.is_active,
+                   c.created_at, c.updated_at
             FROM challenges
+            AS c
+            INNER JOIN challenge_categories AS cc ON cc.category_id = c.category_id
             {where}
             ORDER BY challenge_id
             """,
@@ -280,31 +399,42 @@ def get_challenges(
         conn.close()
 
 
-def add_challenge(category: str, difficulty: Difficulty, text: str) -> Challenge:
+def add_challenge(
+    category: str,
+    difficulty: Difficulty,
+    text: str,
+    actor_user_id: int | None = None,
+) -> Challenge:
+    _require_role(actor_user_id, {ROLE_ADMIN})
     category, text = _validate_challenge(category, text)
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
     try:
+        category_id = _category_id(cursor, category)
         cursor.execute(
             """
-            INSERT INTO challenges (category, difficulty, text, passage_text)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO challenges (category_id, category, difficulty, text, passage_text)
+            VALUES (%s, %s, %s, %s, %s)
             """,
-            (category, difficulty.value, text, text),
+            (category_id, category, difficulty.value, text, text),
         )
         conn.commit()
         cursor.execute(
             """
-            SELECT challenge_id, category, difficulty, text, is_active,
-                   created_at, updated_at
-            FROM challenges
-            WHERE challenge_id = %s
+            SELECT c.challenge_id, cc.category_name AS category, c.difficulty,
+                   COALESCE(c.text, c.passage_text) AS text, c.is_active,
+                   c.created_at, c.updated_at
+            FROM challenges AS c
+            INNER JOIN challenge_categories AS cc ON cc.category_id = c.category_id
+            WHERE c.challenge_id = %s
             """,
             (cursor.lastrowid,),
         )
         row = cursor.fetchone()
         if row is None:
             raise RuntimeError("Challenge was inserted but could not be reloaded.")
+        _audit(cursor, actor_user_id, "CREATE", "challenges", int(row["challenge_id"]), {"category": category})
+        conn.commit()
         return _challenge_from_row(row)
     finally:
         cursor.close()
@@ -316,41 +446,49 @@ def update_challenge(
     category: str,
     difficulty: Difficulty,
     text: str,
+    actor_user_id: int | None = None,
 ) -> Challenge:
+    _require_role(actor_user_id, {ROLE_ADMIN})
     category, text = _validate_challenge(category, text)
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
     try:
+        category_id = _category_id(cursor, category)
         cursor.execute(
             """
             UPDATE challenges
-            SET category = %s, difficulty = %s, text = %s, passage_text = %s
+            SET category_id = %s, category = %s, difficulty = %s, text = %s, passage_text = %s
             WHERE challenge_id = %s
             """,
-            (category, difficulty.value, text, text, challenge_id),
+            (category_id, category, difficulty.value, text, text, challenge_id),
         )
         if cursor.rowcount != 1:
             raise ValueError(f"Challenge {challenge_id} does not exist.")
         conn.commit()
         cursor.execute(
             """
-            SELECT challenge_id, category, difficulty, text, is_active,
-                   created_at, updated_at
-            FROM challenges
-            WHERE challenge_id = %s
+            SELECT c.challenge_id, cc.category_name AS category, c.difficulty,
+                   COALESCE(c.text, c.passage_text) AS text, c.is_active,
+                   c.created_at, c.updated_at
+            FROM challenges AS c
+            INNER JOIN challenge_categories AS cc ON cc.category_id = c.category_id
+            WHERE c.challenge_id = %s
             """,
             (challenge_id,),
         )
         row = cursor.fetchone()
         if row is None:
             raise RuntimeError("Challenge was updated but could not be reloaded.")
+        _audit(cursor, actor_user_id, "UPDATE", "challenges", challenge_id, {"category": category})
+        conn.commit()
         return _challenge_from_row(row)
     finally:
         cursor.close()
         conn.close()
 
 
-def delete_challenge(challenge_id: int) -> None:
+def delete_challenge(challenge_id: int, actor_user_id: int | None = None) -> None:
+    _require_role(actor_user_id, {ROLE_ADMIN})
     """Soft-delete a challenge so historical rounds remain valid."""
     conn = connect_db()
     cursor = conn.cursor()
@@ -361,6 +499,7 @@ def delete_challenge(challenge_id: int) -> None:
         )
         if cursor.rowcount != 1:
             raise ValueError(f"Challenge {challenge_id} does not exist.")
+        _audit(cursor, actor_user_id, "DELETE", "challenges", challenge_id)
         conn.commit()
     finally:
         cursor.close()
@@ -394,8 +533,17 @@ def _round_records(cursor: Any, result_id: int) -> list[RoundRecord]:
     ]
 
 
-def save_result(user_id: int, draft: ResultDraft) -> SaveOutcome:
+def save_result(
+    user_id: int,
+    draft: ResultDraft,
+    actor_user_id: int | None = None,
+) -> SaveOutcome:
     """Persist a result, its rounds, and newly unlocked achievements atomically."""
+    _require_role(actor_user_id, {ROLE_ADMIN, ROLE_PLAYER}, user_id)
+    if draft.accuracy < 50:
+        raise ValueError("Results below 50% accuracy are not accepted.")
+    if draft.wpm > 250:
+        raise ValueError("Results above 250 WPM are not accepted.")
     score = _score(draft)
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
@@ -403,26 +551,27 @@ def save_result(user_id: int, draft: ResultDraft) -> SaveOutcome:
     try:
         cursor.execute(
             """
-            SELECT result_id, user_id, mode, wpm, accuracy, errors, score,
-                   duration_seconds, rounds, created_at
-            FROM results
-            WHERE user_id = %s AND mode = %s
-            ORDER BY score DESC, created_at ASC
-            LIMIT 1
+            SELECT pb.best_score, pb.result_id
+            FROM personal_bests AS pb
+            INNER JOIN game_modes AS gm ON gm.mode_id = pb.mode_id
+            WHERE pb.user_id = %s AND gm.mode_name = %s
             """,
-            (user_id, draft.mode.value),
+            (user_id, _mode_label(draft.mode)),
         )
         previous_row = cursor.fetchone()
+        cursor.execute("SELECT mode_id FROM game_modes WHERE mode_name = %s", (_mode_label(draft.mode),))
+        mode_id = int(cursor.fetchone()["mode_id"])
 
         cursor.execute(
             """
             INSERT INTO results
-                (user_id, mode, wpm, accuracy, errors, score, duration_seconds, rounds)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (user_id, mode, mode_id, wpm, accuracy, errors, score, duration_seconds, rounds)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 user_id,
                 draft.mode.value,
+                mode_id,
                 draft.wpm,
                 draft.accuracy,
                 draft.errors,
@@ -489,6 +638,8 @@ def save_result(user_id: int, draft: ResultDraft) -> SaveOutcome:
                 if cursor.rowcount == 1:
                     unlocked.append(achievement)
 
+        _upsert_personal_best(cursor, user_id, mode_id, score, result_id)
+        _audit(cursor, actor_user_id, "CREATE", "results", result_id, {"mode": draft.mode.value})
         conn.commit()
         previous_score = float(previous_row["score"]) if previous_row else None
         return SaveOutcome(
@@ -496,6 +647,102 @@ def save_result(user_id: int, draft: ResultDraft) -> SaveOutcome:
             unlocked=unlocked,
             is_new_best=previous_score is None or score > previous_score,
         )
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def _mode_label(mode: ModeCode) -> str:
+    return {
+        ModeCode.CLASSIC: "Classic",
+        ModeCode.MEMORY: "Memory Rush",
+        ModeCode.CHAOS: "Key Chaos",
+    }[mode]
+
+
+def _upsert_personal_best(cursor: Any, user_id: int, mode_id: int, score: float, result_id: int) -> None:
+    cursor.execute(
+        """
+        INSERT INTO personal_bests (user_id, mode_id, best_score, result_id)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            best_score = IF(
+                VALUES(best_score) > personal_bests.best_score,
+                VALUES(best_score),
+                personal_bests.best_score
+            ),
+            result_id = IF(
+                VALUES(best_score) > personal_bests.best_score,
+                VALUES(result_id),
+                personal_bests.result_id
+            ),
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (user_id, mode_id, score, result_id),
+    )
+
+
+def _recalculate_personal_best(cursor: Any, user_id: int, mode_id: int) -> None:
+    cursor.execute(
+        """
+        SELECT result_id, score
+        FROM results
+        WHERE user_id = %s AND mode_id = %s
+        ORDER BY score DESC, created_at ASC, result_id ASC
+        LIMIT 1
+        """,
+        (user_id, mode_id),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        cursor.execute(
+            "DELETE FROM personal_bests WHERE user_id = %s AND mode_id = %s",
+            (user_id, mode_id),
+        )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO personal_bests (user_id, mode_id, best_score, result_id)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE best_score = VALUES(best_score),
+                result_id = VALUES(result_id), updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, mode_id, row["score"], row["result_id"]),
+        )
+
+
+def delete_result(
+    user_id: int,
+    result_id: int,
+    actor_user_id: int | None = None,
+) -> None:
+    _require_role(actor_user_id, {ROLE_ADMIN, ROLE_PLAYER}, user_id)
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT user_id, mode_id FROM results WHERE result_id = %s",
+            (result_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError("That result no longer exists.")
+        if int(row["user_id"]) != user_id:
+            raise AuthorizationError("You can only delete your own results.")
+        cursor.execute("DELETE FROM round_results WHERE result_id = %s", (result_id,))
+        cursor.execute("DELETE FROM user_achievements WHERE result_id = %s", (result_id,))
+        cursor.execute(
+            "UPDATE personal_bests SET result_id = NULL WHERE result_id = %s",
+            (result_id,),
+        )
+        cursor.execute("DELETE FROM results WHERE result_id = %s AND user_id = %s", (result_id, user_id))
+        _recalculate_personal_best(cursor, user_id, int(row["mode_id"]))
+        _audit(cursor, actor_user_id, "DELETE", "results", result_id, {"user_id": user_id})
+        conn.commit()
+        re_evaluate_achievements(user_id, actor_user_id)
     except Exception:
         conn.rollback()
         raise
@@ -540,7 +787,7 @@ def get_results(
 
 
 def get_leaderboard(mode: ModeCode) -> list[Result]:
-    """Return one highest-scoring result per user for a mode."""
+    """Return one highest-scoring result per user from personal_bests."""
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
     try:
@@ -548,25 +795,16 @@ def get_leaderboard(mode: ModeCode) -> list[Result]:
             """
             SELECT r.result_id, r.user_id, r.mode, r.wpm, r.accuracy, r.errors,
                    r.score, r.duration_seconds, r.rounds, r.created_at
-            FROM results AS r
-            INNER JOIN (
-                SELECT user_id, MAX(score) AS best_score
-                FROM results
-                WHERE mode = %s
-                GROUP BY user_id
-            ) AS best
-                ON best.user_id = r.user_id AND best.best_score = r.score
-            WHERE r.mode = %s
+            FROM personal_bests AS pb
+            INNER JOIN game_modes AS gm ON gm.mode_id = pb.mode_id
+            INNER JOIN results AS r ON r.result_id = pb.result_id
+            WHERE pb.user_id = r.user_id AND gm.mode_name = %s
             ORDER BY r.score DESC, r.created_at ASC
             """,
-            (mode.value, mode.value),
+            (_mode_label(mode),),
         )
         results = []
-        seen_users: set[int] = set()
         for row in cursor.fetchall():
-            if row["user_id"] in seen_users:
-                continue
-            seen_users.add(row["user_id"])
             results.append(_result_from_row(row, _round_records(cursor, row["result_id"])))
         return results
     finally:
@@ -595,7 +833,7 @@ def seed_achievements() -> None:
 
 def seed_challenges() -> None:
     conn = connect_db()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
     try:
         for category, difficulty, text in (
             ("Proverbs", Difficulty.EASY, "The early bird catches the worm."),
@@ -607,15 +845,16 @@ def seed_challenges() -> None:
             ("Technology", Difficulty.HARD, "Encapsulation, inheritance, polymorphism, and abstraction form the pillars of object-oriented design."),
             ("Science", Difficulty.HARD, "Photosynthesis converts light energy into chemical energy, releasing oxygen as a by-product."),
         ):
+            category_id = _category_id(cursor, category)
             cursor.execute(
                 """
-                INSERT INTO challenges (category, difficulty, text, passage_text)
-                SELECT %s, %s, %s, %s
+                INSERT INTO challenges (category_id, category, difficulty, text, passage_text)
+                SELECT %s, %s, %s, %s, %s
                 WHERE NOT EXISTS (
                     SELECT 1 FROM challenges WHERE text = %s
                 )
                 """,
-                (category, difficulty.value, text, text, text),
+                (category_id, category, difficulty.value, text, text, text),
             )
         conn.commit()
     finally:
@@ -624,8 +863,103 @@ def seed_challenges() -> None:
 
 
 def seed_defaults() -> None:
+    from os import getenv
+
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT user_id FROM users WHERE username = %s", ("admin",))
+        if cursor.fetchone() is None:
+            admin_password = getenv("INKSPEED_ADMIN_PASSWORD", "Admin@12345")
+            cursor.execute("SELECT role_id FROM user_roles WHERE role_name = %s", (ROLE_ADMIN,))
+            role_id = cursor.fetchone()["role_id"]
+            cursor.execute(
+                """
+                INSERT INTO users (username, password_hash, role_id)
+                VALUES (%s, %s, %s)
+                """,
+                ("admin", generate_password_hash(admin_password), role_id),
+            )
+            _audit(cursor, None, "CREATE", "users", cursor.lastrowid, {"username": "admin"})
+            conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
     seed_achievements()
     seed_challenges()
+
+
+def authenticate_user(username: str, password: str) -> User | None:
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT u.user_id, u.username, u.password_hash, u.created_at,
+                   u.role_id, ur.role_name
+            FROM users AS u
+            INNER JOIN user_roles AS ur ON ur.role_id = u.role_id
+            WHERE LOWER(u.username) = LOWER(%s)
+            """,
+            (username.strip(),),
+        )
+        row = cursor.fetchone()
+        if row is None or not row["password_hash"] or not check_password_hash(
+            row["password_hash"], password
+        ):
+            return None
+        return _user_from_row(row)
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def re_evaluate_achievements(user_id: int, actor_user_id: int | None = None) -> None:
+    _require_role(actor_user_id, {ROLE_ADMIN, ROLE_PLAYER}, user_id)
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT result_id, user_id, mode, wpm, accuracy, errors, score,
+                   duration_seconds, rounds, created_at
+            FROM results WHERE user_id = %s
+            """,
+            (user_id,),
+        )
+        results = [_result_from_row(row) for row in cursor.fetchall()]
+        for achievement in ACHIEVEMENTS:
+            cursor.execute(
+                "SELECT achievement_id FROM achievements WHERE code = %s",
+                (achievement.code,),
+            )
+            achievement_row = cursor.fetchone()
+            if achievement_row is None:
+                continue
+            qualifies = next((result for result in results if achievement.test(result)), None)
+            if qualifies is None:
+                cursor.execute(
+                    """
+                    DELETE FROM user_achievements
+                    WHERE user_id = %s AND achievement_id = %s
+                    """,
+                    (user_id, achievement_row["achievement_id"]),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT IGNORE INTO user_achievements (user_id, achievement_id, result_id)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (user_id, achievement_row["achievement_id"], qualifies.result_id),
+                )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        conn.close()
 
 
 def get_user_achievements(user_id: int) -> list[UserAchievement]:

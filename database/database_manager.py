@@ -546,6 +546,9 @@ def _round_records(cursor: Any, result_id: int) -> list[RoundRecord]:
     ]
 
 
+MODE_IDS = {"classic": 1, "memory": 2, "chaos": 3}
+
+
 def save_result(
     user_id: int,
     draft: ResultDraft,
@@ -579,13 +582,14 @@ def save_result(
         cursor.execute(
             """
             INSERT INTO results
-                (user_id, mode, mode_id, wpm, accuracy, errors, score, duration_seconds, rounds)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (user_id, mode, mode_id, wpm, accuracy, errors, score,
+                 duration_seconds, rounds, rounds_completed)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 user_id,
                 draft.mode.value,
-                mode_id,
+                MODE_IDS[draft.mode.value],
                 draft.wpm,
                 draft.accuracy,
                 draft.errors,
@@ -659,7 +663,8 @@ def save_result(
         _audit(cursor, actor_user_id, "CREATE", "results",
                result_id, {"mode": draft.mode.value})
         conn.commit()
-        previous_score = float(previous_row["score"]) if previous_row else None
+        previous_score = float(
+            previous_row["best_score"]) if previous_row else None
         return SaveOutcome(
             result=result,
             unlocked=unlocked,
